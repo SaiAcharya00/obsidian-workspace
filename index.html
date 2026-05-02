@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Obsidian Workspace</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=DM+Mono:wght@300;400;500&family=Nunito:wght@300;400;500;600&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body,#root{height:100%;overflow:hidden;}
+  ::-webkit-scrollbar{width:4px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#1e3a4f;border-radius:2px;}
+  .masonry{columns:2;column-gap:16px;}
+  @media(max-width:700px){.masonry{columns:1;}}
+  .masonry-item{break-inside:avoid;margin-bottom:16px;}
+  @keyframes fadeSlideIn{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes stickyIn{from{opacity:0;transform:scale(0.85) rotate(-3deg);}to{opacity:1;transform:scale(1);}}
+  @keyframes ringPulse{0%,100%{filter:drop-shadow(0 0 6px #00d4ffaa);}50%{filter:drop-shadow(0 0 18px #00d4ffff);}}
+  @keyframes timerDoneFlash{0%,100%{filter:drop-shadow(0 0 4px #00d4ff66);}50%{filter:drop-shadow(0 0 22px #00d4ffff) brightness(1.3);}}
+  @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-16px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+  @keyframes toastOut{from{opacity:1;transform:translateX(-50%) translateY(0);}to{opacity:0;transform:translateX(-50%) translateY(-16px);}}
+  .note-card{animation:fadeSlideIn 0.45s ease both;}
+  .sticky-card{animation:stickyIn 0.35s cubic-bezier(.34,1.56,.64,1) both;}
+  .timer-done-glow{animation:timerDoneFlash 0.7s ease infinite;}
+  textarea:focus,input:focus{outline:none;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+function useLocalStorage(key, def) {
+  const [val, setVal] = useState(() => {
+    try { const s=localStorage.getItem(key); return s?JSON.parse(s):def; } catch{return def;}
+  });
+  useEffect(()=>{ try{localStorage.setItem(key,JSON.stringify(val));}catch{} },[key,val]);
+  return [val, setVal];
+}
+
+const BG      = "#0a0f1e";
+const SIDEBAR = "#0d1424";
+const CARD_BG = "rgba(26,34,53,0.95)";
+const CYAN    = "#00d4ff";
+const TEXT    = "#e8f4f8";
+const MUTED   = "#7a9bb5";
+const MUTED2  = "#3d5a73";
+const BORDER  = "rgba(0,212,255,0.12)";
+
+const STICKY_COLORS = {
+  yellow:   {bg:"#fef3c7",shadow:"#d97706",text:"#78350f"},
+  pink:     {bg:"#fce7f3",shadow:"#db2777",text:"#831843"},
+  mint:     {bg:"#d1fae5",shadow:"#059669",text:"#064e3b"},
+  lavender: {bg:"#ede9fe",shadow:"#7c3aed",text:"#3b0764"},
+};
+
+const glassCard = {
+  background: CARD_BG, border:`1px solid ${BORDER}`, borderRadius:16,
+  backdropFilter:"blur(12px)",
+  boxShadow:`0 4px 32px rgba(0,0,0,0.5),inset 0 1px 0 rgba(0,212,255,0.06)`,
+  overflow:"hidden",
+};
+const cardHover = `0 8px 40px rgba(0,212,255,0.18),inset 0 1px 0 rgba(0,212,255,0.1)`;
+const btn = a => ({
+  background: a ? CYAN : "rgba(0,212,255,0.08)",
+  border:`1px solid ${a?CYAN:BORDER}`, color: a?"#0a0f1e":TEXT,
+  borderRadius:10, padding:"8px 18px", fontFamily:"'Nunito',sans-serif",
+  fontWeight:600, fontSize:13, cursor:"pointer", transition:"all 0.2s", letterSpacing:"0.03em",
+});
+const iconBtn = c => ({
+  background:"transparent", border:"none", color:c||MUTED,
+  cursor:"pointer", padding:"4px 6px", borderRadius:6, fontSize:15, lineHeight:1,
+});
+
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const beep=(freq,start,dur)=>{
+      const osc=ctx.createOscillator(), gain=ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value=freq;
+      gain.gain.setValueAtTime(0.3,ctx.currentTime+start);
+      gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+start+dur);
+      osc.start(ctx.currentTime+start); osc.stop(ctx.currentTime+start+dur);
+    };
+    beep(880,0,0.4); beep(1100,0.45,0.4); beep(880,0.9,0.6);
+  } catch(e){}
+}
+
+function Toast({msg, onDone}) {
+  const [leaving,setLeaving]=useState(false);
+  useEffect(()=>{
+    const t1=setTimeout(()=>setLeaving(true),3400);
+    const t2=setTimeout(()=>onDone(),3800);
+    return()=>{clearTimeout(t1);clearTimeout(t2);};
+  },[]);
+  return (
+    <div style={{position:"fixed",top:20,left:"50%",
+      background:"linear-gradient(135deg,#0d1f2e,#122030)",
+      border:`1px solid ${CYAN}`,borderRadius:12,padding:"12px 24px",color:TEXT,
+      fontFamily:"'Nunito',sans-serif",fontWeight:600,fontSize:14,
+      boxShadow:"0 4px 30px rgba(0,212,255,0.35)",zIndex:9999,
+      display:"flex",alignItems:"center",gap:10,
+      animation:`${leaving?"toastOut":"toastIn"} 0.35s ease both`,
+    }}>
+      <span style={{fontSize:18}}>⏰</span> {msg}
+    </div>
+  );
+}
+
+function DeleteConfirm({label, onConfirm, onCancel}) {
+  return (
+    <div style={{position:"absolute",inset:0,borderRadius:"inherit",
+      background:"rgba(10,15,30,0.9)",backdropFilter:"blur(4px)",
+      display:"flex",flexDirection:"column",alignItems:"center",
+      justifyContent:"center",gap:12,zIndex:10,padding:16}}>
+      <div style={{color:TEXT,fontFamily:"'Nunito',sans-serif",fontSize:13.5,fontWeight:600,textAlign:"center"}}>{label}</div>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={onConfirm} style={{...btn(true),padding:"6px 16px",fontSize:12,background:"#c0392b",border:"1px solid #e74c3c",color:"#fff"}}>Yes, delete</button>
+        <button onClick={onCancel} style={{...btn(false),padding:"6px 16px",fontSize:12}}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function AnalogClock() {
+  const [time,setTime]=useState(new Date());
+  useEffect(()=>{const id=setInterval(()=>setTime(new Date()),50);return()=>clearInterval(id);},[]);
+  const cx=80,cy=80;
+  const s=time.getSeconds()+time.getMilliseconds()/1000;
+  const m=time.getMinutes()+s/60;
+  const h=(time.getHours()%12)+m/60;
+  const ang=deg=>(deg-90)*Math.PI/180;
+  const hand=(turns,len,w,color,glow)=>{
+    const a=ang(turns*360);
+    return <line x1={cx} y1={cy} x2={cx+len*Math.cos(a)} y2={cy+len*Math.sin(a)}
+      stroke={color} strokeWidth={w} strokeLinecap="round"
+      style={glow?{filter:`drop-shadow(0 0 5px ${color})`}:{}}/>;
+  };
+  const ticks=Array.from({length:60},(_,i)=>{
+    const a=ang(i*6),major=i%5===0,r1=major?58:63;
+    return <line key={i} x1={cx+r1*Math.cos(a)} y1={cy+r1*Math.sin(a)}
+      x2={cx+70*Math.cos(a)} y2={cy+70*Math.sin(a)}
+      stroke={major?CYAN:MUTED2} strokeWidth={major?1.5:0.7} strokeLinecap="round"/>;
+  });
+  return (
+    <svg viewBox="0 0 160 160" width="100%" style={{filter:"drop-shadow(0 0 18px rgba(0,212,255,0.2))"}}>
+      <circle cx={cx} cy={cy} r={72} fill="#080d1a" stroke={CYAN} strokeWidth={1.2}/>
+      <circle cx={cx} cy={cy} r={66} fill="none" stroke="rgba(0,212,255,0.07)" strokeWidth={0.5}/>
+      {ticks}
+      {hand(h/12,38,3.5,TEXT)}{hand(m/60,52,2.5,TEXT)}{hand(s/60,60,1.4,CYAN,true)}
+      <circle cx={cx} cy={cy} r={4} fill={CYAN}/><circle cx={cx} cy={cy} r={2} fill="#080d1a"/>
+    </svg>
+  );
+}
+
+function ClockDigital() {
+  const [t,setT]=useState(new Date());
+  useEffect(()=>{const id=setInterval(()=>setT(new Date()),500);return()=>clearInterval(id);},[]);
+  const pad=n=>n.toString().padStart(2,"0");
+  const day=t.toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
+  return (
+    <div style={{textAlign:"center"}}>
+      <div style={{fontFamily:"'DM Mono',monospace",fontSize:48,fontWeight:400,color:TEXT,letterSpacing:"0.06em"}}>
+        {pad(t.getHours())}<span style={{color:CYAN}}>:</span>{pad(t.getMinutes())}<span style={{color:CYAN}}>:</span>{pad(t.getSeconds())}
+      </div>
+      <div style={{fontFamily:"'Nunito',sans-serif",fontSize:14,color:MUTED,marginTop:10,letterSpacing:"0.04em"}}>{day}</div>
+    </div>
+  );
+}
+
+function CircularTimer({progress,done}) {
+  const R=72,CIRC=2*Math.PI*R,offset=CIRC*(1-Math.max(0,Math.min(1,progress)));
+  return (
+    <svg viewBox="0 0 160 160" width={160} height={160} className={done?"timer-done-glow":""}>
+      <circle cx={80} cy={80} r={R} fill="none" stroke="rgba(0,212,255,0.1)" strokeWidth={7}/>
+      <circle cx={80} cy={80} r={R} fill="none" stroke={done?"#ff4444":CYAN} strokeWidth={7}
+        strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={offset}
+        transform="rotate(-90 80 80)"
+        style={{transition:"stroke-dashoffset 0.12s linear,stroke 0.3s"}}/>
+    </svg>
+  );
+}
+
+let noteId=Date.now(), stickyId=Date.now()+1, lapId=0;
+
+function App() {
+  const [section,setSection]=useState("notes");
+  const [transitioning,setTrans]=useState(false);
+  const [toast,setToast]=useState(null);
+
+  const [notes,setNotes]=useLocalStorage("obs_notes",[
+    {id:1,title:"Welcome to Obsidian ✦",body:"A premium workspace for your thoughts. Create notes, add sticky reminders, and track your time — all in one beautiful place.",ts:Date.now()},
+    {id:2,title:"Design Philosophy",body:"Crafted with intention. Every detail — the electric cyan glow, the frosted glass cards, the smooth transitions — is designed to inspire focused work.",ts:Date.now()-5000},
+  ]);
+  const [stickies,setStickies]=useLocalStorage("obs_stickies",[
+    {id:10,color:"yellow",text:"Buy oat milk ☕",rot:-2},
+    {id:11,color:"mint",text:"Call dentist 📞",rot:1.5},
+    {id:12,color:"lavender",text:"Read chapter 7 📖",rot:-1},
+    {id:13,color:"pink",text:"Ship v2 feature 🚀",rot:2},
+  ]);
+  const [timerInput,setTimerInput]=useLocalStorage("obs_timer_input",{min:"05",sec:"00"});
+  const [laps,setLaps]=useLocalStorage("obs_laps",[]);
+
+  const [editingNote,setEditingNote]=useState(null);
+  const [noteForm,setNoteForm]=useState({title:"",body:""});
+  const [editingSticky,setEditingSticky]=useState(null);
+  const [confirmNote,setConfirmNote]=useState(null);
+  const [confirmSticky,setConfirmSticky]=useState(null);
+
+  const [timerTotal,setTimerTotal]=useState(()=>(parseInt(timerInput.min)||0)*60+(parseInt(timerInput.sec)||0));
+  const [timerLeft,setTimerLeft]=useState(()=>(parseInt(timerInput.min)||0)*60+(parseInt(timerInput.sec)||0));
+  const [timerRunning,setTimerRunning]=useState(false);
+  const [timerDone,setTimerDone]=useState(false);
+  const timerRef=useRef(null);
+
+  const [swTime,setSwTime]=useState(0);
+  const [swRunning,setSwRunning]=useState(false);
+  const swRef=useRef(null),swStart=useRef(0),swBase=useRef(0);
+
+  useEffect(()=>{
+    if(timerRunning&&timerLeft>0){
+      timerRef.current=setInterval(()=>{
+        setTimerLeft(p=>{
+          if(p<=1){
+            clearInterval(timerRef.current);
+            setTimerRunning(false);setTimerDone(true);
+            playBeep();setToast("Time's up!");
+            return 0;
+          }
+          return p-1;
+        });
+      },1000);
+    }
+    return()=>clearInterval(timerRef.current);
+  },[timerRunning]);
+
+  const timerStart=()=>{if(timerLeft===0)return;setTimerDone(false);setTimerRunning(true);};
+  const timerPause=()=>{clearInterval(timerRef.current);setTimerRunning(false);};
+  const timerReset=()=>{
+    clearInterval(timerRef.current);setTimerRunning(false);setTimerDone(false);
+    const t=(parseInt(timerInput.min)||0)*60+(parseInt(timerInput.sec)||0);
+    setTimerTotal(t);setTimerLeft(t);
+  };
+  const handleTimerInput=(field,val)=>setTimerInput(p=>({...p,[field]:val.replace(/\D/g,"").slice(0,2)}));
+  const applyTimerInput=()=>{
+    const t=(parseInt(timerInput.min)||0)*60+(parseInt(timerInput.sec)||0);
+    setTimerTotal(t);setTimerLeft(t);setTimerDone(false);
+  };
+
+  const swStart_=()=>{swStart.current=performance.now();swRef.current=setInterval(()=>setSwTime(swBase.current+performance.now()-swStart.current),30);setSwRunning(true);};
+  const swPause_=()=>{clearInterval(swRef.current);swBase.current+=performance.now()-swStart.current;setSwRunning(false);};
+  const swReset_=()=>{clearInterval(swRef.current);setSwRunning(false);setSwTime(0);swBase.current=0;setLaps([]);};
+  const swLap_=()=>{if(!swRunning)return;setLaps(p=>[{id:++lapId,t:swTime},...p]);};
+
+  const fmtSW=ms=>{
+    const h=Math.floor(ms/3600000).toString().padStart(2,"0");
+    const m=Math.floor((ms%3600000)/60000).toString().padStart(2,"0");
+    const s=Math.floor((ms%60000)/1000).toString().padStart(2,"0");
+    const c=Math.floor((ms%1000)/10).toString().padStart(2,"0");
+    return`${h}:${m}:${s}.${c}`;
+  };
+  const fmtTimer=sec=>`${Math.floor(sec/60).toString().padStart(2,"0")}:${(sec%60).toString().padStart(2,"0")}`;
+
+  const goTo=s=>{if(s===section)return;setTrans(true);setTimeout(()=>{setSection(s);setTrans(false);},220);};
+
+  const saveNote=()=>{
+    if(!noteForm.title&&!noteForm.body)return;
+    if(editingNote){setNotes(p=>p.map(n=>n.id===editingNote?{...n,...noteForm,ts:Date.now()}:n));}
+    else{setNotes(p=>[{id:++noteId,...noteForm,ts:Date.now()},...p]);}
+    setEditingNote(null);setNoteForm({title:"",body:""});
+  };
+
+  const addSticky=color=>{
+    const rot=(Math.random()-0.5)*5,id=++stickyId;
+    setStickies(p=>[{id,color,text:"New note…",rot},...p]);
+    setEditingSticky(id);
+  };
+
+  const navItems=[
+    {id:"notes",icon:"✦",label:"Notes"},
+    {id:"sticky",icon:"◈",label:"Sticky Notes"},
+    {id:"timers",icon:"◎",label:"Timer & Stopwatch"},
+    {id:"clock",icon:"◷",label:"Clock"},
+  ];
+
+  const GRAIN="url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E\")";
+  const mainStyle={opacity:transitioning?0:1,transform:transitioning?"translateY(12px)":"translateY(0)",transition:"opacity 0.22s ease,transform 0.22s ease"};
+
+  return (
+    <div style={{display:"flex",height:"100vh",background:BG,fontFamily:"'Nunito',sans-serif",color:TEXT,overflow:"hidden",backgroundImage:GRAIN}}>
+
+      {toast&&<Toast msg={toast} onDone={()=>setToast(null)}/>}
+
+      {/* SIDEBAR */}
+      <div style={{width:220,background:SIDEBAR,borderRight:`1px solid ${BORDER}`,display:"flex",flexDirection:"column",padding:"28px 0 20px",flexShrink:0}}>
+        <div style={{padding:"0 20px 28px"}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:CYAN,letterSpacing:"0.02em"}}>Obsidian</div>
+          <div style={{fontSize:11,color:MUTED2,marginTop:3,letterSpacing:"0.08em",textTransform:"uppercase"}}>Workspace</div>
+        </div>
+        <nav style={{flex:1,padding:"0 12px"}}>
+          {navItems.map(n=>(
+            <button key={n.id} onClick={()=>goTo(n.id)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",
+              background:section===n.id?CYAN:"transparent",
+              border:`1px solid ${section===n.id?CYAN:BORDER}`,
+              borderRadius:10,padding:"10px 14px",
+              color:section===n.id?"#0a0f1e":MUTED,
+              fontFamily:"'Nunito',sans-serif",fontWeight:600,fontSize:13.5,
+              cursor:"pointer",transition:"all 0.2s",marginBottom:4,textAlign:"left",letterSpacing:"0.02em"}}>
+              <span style={{fontSize:16,lineHeight:1}}>{n.icon}</span>{n.label}
+            </button>
+          ))}
+        </nav>
+        <div style={{padding:"16px 20px 0",borderTop:`1px solid ${BORDER}`}}>
+          <div style={{fontSize:10,color:MUTED2,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>Live Clock</div>
+          <AnalogClock/>
+        </div>
+      </div>
+
+      {/* MAIN */}
+      <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <div style={{flex:1,overflowY:"auto",padding:"36px 40px",...mainStyle}}>
+
+          {/* NOTES */}
+          {section==="notes"&&(
+            <div>
+              <h1 style={{fontFamily:"'Playfair Display',serif",fontSize:32,fontWeight:700,color:TEXT,marginBottom:6}}>Notes</h1>
+              <p style={{color:MUTED,fontSize:13.5,marginBottom:28}}>Your thoughts, beautifully organized.</p>
+              <div style={{...glassCard,padding:20,marginBottom:28}}>
+                <input value={noteForm.title} onChange={e=>setNoteForm(p=>({...p,title:e.target.value}))} placeholder="Title…"
+                  style={{width:"100%",background:"transparent",border:"none",borderBottom:`1px solid ${BORDER}`,color:TEXT,fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:600,padding:"4px 0 10px",marginBottom:12,caretColor:CYAN}}/>
+                <textarea value={noteForm.body} onChange={e=>setNoteForm(p=>({...p,body:e.target.value}))} placeholder="What's on your mind…" rows={4}
+                  style={{width:"100%",background:"transparent",border:"none",color:TEXT,fontFamily:"'Nunito',sans-serif",fontSize:14,resize:"none",lineHeight:1.7,caretColor:CYAN}}/>
+                <div style={{display:"flex",gap:10,marginTop:14}}>
+                  <button onClick={saveNote} style={{...btn(true),padding:"8px 22px"}}>{editingNote?"Update Note":"＋ Save Note"}</button>
+                  {editingNote&&<button onClick={()=>{setEditingNote(null);setNoteForm({title:"",body:""});}} style={btn(false)}>Cancel</button>}
+                </div>
+              </div>
+              <div className="masonry">
+                {notes.map((n,i)=>(
+                  <div key={n.id} className="masonry-item note-card" style={{animationDelay:`${i*0.06}s`}}>
+                    <div style={{...glassCard,padding:"18px 20px",transition:"box-shadow 0.2s,transform 0.2s",position:"relative"}}
+                      onMouseEnter={e=>{e.currentTarget.style.boxShadow=cardHover;e.currentTarget.style.transform="translateY(-2px)";}}
+                      onMouseLeave={e=>{e.currentTarget.style.boxShadow=glassCard.boxShadow;e.currentTarget.style.transform="";}}>
+                      {confirmNote===n.id&&(
+                        <DeleteConfirm label="Delete this note?"
+                          onConfirm={()=>{setNotes(p=>p.filter(x=>x.id!==n.id));setConfirmNote(null);}}
+                          onCancel={()=>setConfirmNote(null)}/>
+                      )}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                        <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:600,color:TEXT,lineHeight:1.3,flex:1,marginRight:8,wordBreak:"break-word",overflowWrap:"break-word"}}>{n.title||"Untitled"}</div>
+                        <div style={{display:"flex",gap:2,flexShrink:0}}>
+                          <button style={iconBtn(MUTED)} title="Edit"
+                            onClick={()=>{setEditingNote(n.id);setNoteForm({title:n.title,body:n.body});}}
+                            onMouseEnter={e=>e.target.style.color=CYAN}
+                            onMouseLeave={e=>e.target.style.color=MUTED}>✎</button>
+                          <button style={iconBtn(MUTED)} title="Delete"
+                            onClick={()=>setConfirmNote(n.id)}
+                            onMouseEnter={e=>e.target.style.color="#ff4444"}
+                            onMouseLeave={e=>e.target.style.color=MUTED}>✕</button>
+                        </div>
+                      </div>
+                      <p style={{fontSize:13.5,color:"#9ab8cc",lineHeight:1.75,wordWrap:"break-word",overflowWrap:"break-word",wordBreak:"break-word",overflow:"hidden"}}>{n.body}</p>
+                      <div style={{fontSize:10.5,color:MUTED2,marginTop:14,letterSpacing:"0.04em"}}>
+                        {new Date(n.ts).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* STICKY */}
+          {section==="sticky"&&(
+            <div>
+              <h1 style={{fontFamily:"'Playfair Display',serif",fontSize:32,fontWeight:700,color:TEXT,marginBottom:6}}>Sticky Notes</h1>
+              <p style={{color:MUTED,fontSize:13.5,marginBottom:24}}>Quick thoughts, colorfully captured.</p>
+              <div style={{display:"flex",gap:10,marginBottom:30,flexWrap:"wrap"}}>
+                {Object.entries(STICKY_COLORS).map(([c,v])=>(
+                  <button key={c} onClick={()=>addSticky(c)} style={{background:v.bg,border:`2px solid ${v.shadow}33`,borderRadius:10,padding:"8px 18px",color:v.text,fontWeight:700,fontSize:13,fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all 0.18s",boxShadow:`0 2px 12px ${v.shadow}33`}}
+                    onMouseEnter={e=>{e.target.style.transform="translateY(-2px)";e.target.style.boxShadow=`0 6px 18px ${v.shadow}55`;}}
+                    onMouseLeave={e=>{e.target.style.transform="";e.target.style.boxShadow=`0 2px 12px ${v.shadow}33`;}}>
+                    ＋ {c.charAt(0).toUpperCase()+c.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:24}}>
+                {stickies.map((s,i)=>{
+                  const{bg,shadow,text}=STICKY_COLORS[s.color];
+                  return(
+                    <div key={s.id} className="sticky-card" style={{animationDelay:`${i*0.05}s`,width:185,minHeight:165,position:"relative"}}>
+                      <div style={{position:"relative",background:bg,borderRadius:4,padding:"16px 14px 14px",transform:`rotate(${s.rot}deg)`,boxShadow:`2px 4px 14px ${shadow}44,inset 0 0 0 1px ${shadow}22`,transition:"transform 0.2s,box-shadow 0.2s",minHeight:165,backgroundImage:"repeating-linear-gradient(transparent,transparent 27px,rgba(0,0,0,0.06) 27px,rgba(0,0,0,0.06) 28px)",overflow:"hidden"}}
+                        onMouseEnter={e=>{e.currentTarget.style.transform=`rotate(0deg) scale(1.03)`;e.currentTarget.style.boxShadow=`4px 8px 22px ${shadow}66`;}}
+                        onMouseLeave={e=>{e.currentTarget.style.transform=`rotate(${s.rot}deg)`;e.currentTarget.style.boxShadow=`2px 4px 14px ${shadow}44`;}}>
+                        {confirmSticky===s.id&&(
+                          <DeleteConfirm label="Delete this sticky?"
+                            onConfirm={()=>{setStickies(p=>p.filter(x=>x.id!==s.id));setConfirmSticky(null);}}
+                            onCancel={()=>setConfirmSticky(null)}/>
+                        )}
+                        <div style={{position:"absolute",top:-10,left:"50%",transform:"translateX(-50%)",width:48,height:18,background:`${shadow}33`,borderRadius:3}}/>
+                        <button onClick={()=>setConfirmSticky(s.id)} style={{position:"absolute",top:6,right:6,background:"transparent",border:"none",color:text,cursor:"pointer",opacity:0.55,fontSize:13,lineHeight:1}}>✕</button>
+                        {editingSticky===s.id
+                          ?<textarea autoFocus value={s.text} onChange={e=>setStickies(p=>p.map(x=>x.id===s.id?{...x,text:e.target.value}:x))} onBlur={()=>setEditingSticky(null)} style={{background:"transparent",border:"none",color:text,fontFamily:"'Nunito',sans-serif",fontWeight:600,fontSize:14,width:"100%",resize:"none",minHeight:100,caretColor:shadow}}/>
+                          :<div onClick={()=>setEditingSticky(s.id)} style={{color:text,fontFamily:"'Nunito',sans-serif",fontWeight:600,fontSize:14,lineHeight:1.6,cursor:"text",minHeight:100,wordBreak:"break-word"}}>{s.text}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* TIMERS */}
+          {section==="timers"&&(
+            <div>
+              <h1 style={{fontFamily:"'Playfair Display',serif",fontSize:32,fontWeight:700,color:TEXT,marginBottom:6}}>Timer & Stopwatch</h1>
+              <p style={{color:MUTED,fontSize:13.5,marginBottom:32}}>Focus. Measure. Achieve.</p>
+              <div style={{display:"flex",gap:28,flexWrap:"wrap"}}>
+                <div style={{...glassCard,padding:32,flex:"1 1 300px",textAlign:"center",minWidth:280}}>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,color:CYAN,marginBottom:24,letterSpacing:"0.12em",textTransform:"uppercase"}}>Countdown Timer</div>
+                  <div style={{position:"relative",display:"inline-block",marginBottom:20}}>
+                    <CircularTimer progress={timerTotal>0?timerLeft/timerTotal:1} done={timerDone}/>
+                    <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:32,fontWeight:500,letterSpacing:"0.04em",
+                        color:timerDone?"#ff4444":TEXT,
+                        filter:timerDone?"drop-shadow(0 0 10px #ff444488)":"none",transition:"filter 0.3s"}}>
+                        {fmtTimer(timerLeft)}
+                      </div>
+                      {timerDone&&<div style={{fontSize:11,color:"#ff4444",marginTop:4,letterSpacing:"0.08em",fontFamily:"'DM Mono',monospace"}}>TIME'S UP</div>}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:20}}>
+                    <input value={timerInput.min} onChange={e=>handleTimerInput("min",e.target.value)} onBlur={applyTimerInput}
+                      style={{width:52,textAlign:"center",background:"rgba(0,212,255,0.07)",border:`1px solid ${BORDER}`,borderRadius:8,color:TEXT,fontFamily:"'DM Mono',monospace",fontSize:16,padding:"6px 4px"}}/>
+                    <span style={{color:MUTED,alignSelf:"center",fontSize:18}}>:</span>
+                    <input value={timerInput.sec} onChange={e=>handleTimerInput("sec",e.target.value)} onBlur={applyTimerInput}
+                      style={{width:52,textAlign:"center",background:"rgba(0,212,255,0.07)",border:`1px solid ${BORDER}`,borderRadius:8,color:TEXT,fontFamily:"'DM Mono',monospace",fontSize:16,padding:"6px 4px"}}/>
+                  </div>
+                  <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+                    {!timerRunning?<button onClick={timerStart} style={btn(true)}>▶ Start</button>:<button onClick={timerPause} style={btn(false)}>⏸ Pause</button>}
+                    <button onClick={timerReset} style={btn(false)}>↺ Reset</button>
+                  </div>
+                </div>
+                <div style={{...glassCard,padding:32,flex:"1 1 300px",textAlign:"center",minWidth:280}}>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,color:CYAN,marginBottom:24,letterSpacing:"0.12em",textTransform:"uppercase"}}>Stopwatch</div>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:38,fontWeight:500,color:TEXT,letterSpacing:"0.04em",marginBottom:28}}>{fmtSW(swTime)}</div>
+                  <div style={{display:"flex",gap:10,justifyContent:"center",marginBottom:24,flexWrap:"wrap"}}>
+                    {!swRunning?<button onClick={swStart_} style={btn(true)}>▶ Start</button>:<button onClick={swPause_} style={btn(false)}>⏸ Pause</button>}
+                    <button onClick={swLap_} style={btn(false)} disabled={!swRunning}>⊕ Lap</button>
+                    <button onClick={swReset_} style={btn(false)}>↺ Reset</button>
+                  </div>
+                  {laps.length>0&&(
+                    <div style={{maxHeight:180,overflowY:"auto",borderTop:`1px solid ${BORDER}`,paddingTop:14}}>
+                      {laps.map((l,i)=>(
+                        <div key={l.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid rgba(0,212,255,0.07)`}}>
+                          <span style={{color:MUTED,fontSize:12,fontFamily:"'DM Mono',monospace"}}>Lap {laps.length-i}</span>
+                          <span style={{color:TEXT,fontSize:13,fontFamily:"'DM Mono',monospace"}}>{fmtSW(l.t)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CLOCK */}
+          {section==="clock"&&(
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"70vh"}}>
+              <h1 style={{fontFamily:"'Playfair Display',serif",fontSize:32,fontWeight:700,color:TEXT,marginBottom:6}}>Clock</h1>
+              <p style={{color:MUTED,fontSize:13.5,marginBottom:44}}>Time, in its most beautiful form.</p>
+              <div style={{...glassCard,padding:40,display:"flex",flexDirection:"column",alignItems:"center",gap:28}}>
+                <div style={{width:280}}><AnalogClock/></div>
+                <ClockDigital/>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
